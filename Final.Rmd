@@ -1,0 +1,179 @@
+---
+title: "Tesla's Sale Proportion of Electric Vehicles"
+output: html_document
+date: "2023-04-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+source("../../scripts/viridis.R")
+source("../../scripts/ggprob.R")
+```
+
+```{r, include=FALSE}
+mw = read_csv("Electric_Vehicle_Population_Data-1.csv") %>%
+  rename(Type = "Electric Vehicle Type", Manufacturer = "Make") %>%
+  filter(Type == "Battery Electric Vehicle (BEV)" & Year > 2011) %>%
+  group_by(Manufacturer, Year) %>%
+  mutate(count = n()) %>%
+  filter(count >= 50) %>%
+  select(Year, Manufacturer, Model)
+
+yearMakes = mw %>%
+  group_by(Manufacturer, Year) %>%
+  summarize(n = n()) %>%
+  group_by(Year) %>%
+  summarize(n = n())
+
+teslaProp = mw %>%
+  group_by(Year) %>%
+  summarize(Year, Manufacturer, yCount = n()) %>%
+  group_by(Year, Manufacturer) %>%
+  summarize(Year, Manufacturer, yCount, mCount = n()) %>%
+  unique() %>%
+  ungroup() %>%
+  filter(Manufacturer == "TESLA") %>%
+  summarize(Year, proportion = mCount / yCount)
+
+yearCars = mw %>%
+  group_by(Year) %>%
+  summarize(cars = n())
+
+marketShare = inner_join(teslaProp, yearMakes, by = "Year") %>%
+  mutate(Random = 1 / n) %>%
+  rename(Calculated = proportion) %>%
+  select(-n) %>%
+  pivot_longer(cols = c("Calculated", "Random"), names_to = "type", values_to = "values")
+
+ci = inner_join(teslaProp, yearMakes, by = "Year") %>%
+  inner_join(yearCars, by = "Year") %>%
+  rename(Manufacturers = n, Expected = proportion) %>%
+  mutate(p_tilde = ((cars * Expected) + 2) / (cars + 4)) %>%
+  mutate(High = p_tilde + 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4))) %>%
+  mutate(Low = p_tilde - 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4))) %>%
+  pivot_longer(cols = c("Expected", "High", "Low"), names_to = "type", values_to = "proportion")
+
+ciExpected = inner_join(teslaProp, yearMakes, by = "Year") %>%
+  inner_join(yearCars, by = "Year") %>%
+  rename(makes = n, Calculated = proportion) %>%
+  mutate(p_tilde = ((cars * Calculated) + 2) / (cars + 4), Competitive = 1 / makes) %>%
+  mutate(High = p_tilde + 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4))) %>%
+  mutate(Low = p_tilde - 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4))) %>%
+  rename(Random = "Competitive", "CI High" = "High", "CI Low" = "Low") %>%
+  pivot_longer(cols = c("CI High", "Calculated", "CI Low", "Random"), names_to = "type", values_to = "proportion")
+
+ciExpectedPValue = inner_join(teslaProp, yearMakes, by = "Year") %>%
+  inner_join(yearCars, by = "Year") %>%
+  rename(Manufacturers = n, Expected = proportion) %>%
+  mutate(p_tilde = ((cars * Expected) + 2) / (cars + 4), Competitive = 1 / Manufacturers) %>%
+  mutate(High = p_tilde + 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4))) %>%
+  mutate(Low = p_tilde - 1.96 * sqrt((p_tilde * (1 - p_tilde))/(cars + 4)))
+```
+
+### Introduction
+
+Electric cars are becoming more popular across the United States as the price decreases, production increases and they become more generally available. When people think of electric cars, one brand that comes to mind most is Tesla. We decided to look at Tesla's proportion of sales in the electric vehicle market and how it has changed over the years. We believe that Tesla sells a larger proportion of cars than if people chose their cars from manufacturers at random.
+
+### Background
+Our data is information about electric vehicles registered in the state of Washington. The data was collected by the Washington government to keep track of car sales and information on the cars. Each row of the dataset represents a single car, and has information about it. The information we are interested in is the year and manufacturer. The make is what company produces the car (ex: Nissan, Tesla, Kia).
+
+Some of the cars in the original dataset are hybrid cars, so we filtered those out to only focus on pure electric cars. The data is also filtered to be years from 2012 onwards, as the electric cars sold in years prior to 2012 are limited, or Tesla didn't sell cars that year. For a manufacturer to be counted as producing cars in any year, we required them to produce at least 50 cars that year as some companies produced prototype or special order cars, and we don't want these companies having an affect on the random choice proportion.
+
+For our analysis we will be looking at the proportion of cars sold that are Tesla from 2012 onward. We also used 2023 data despite the year not being over, because we are looking at proportions, so the individual amount of cars sold doesn't matter. We will be using a binomial distribution for each year, and whether each car sold is or isn't a Tesla. The expected proportion of cars sold in the binomial distribution for each year will be 1 divided by the number of manufacturers that year (So if a year had 4 manufacturers, the chance that a car being sold at random is a Tesla is 0.25, or 25%). We will compare the expected proportion of cars sold when consumers choose at random with the proportion we calculate from our data.
+
+#### Data Source
+
+Electric Vehicle Population Data, State of Washington https://catalog.data.gov/dataset/electric-vehicle-population-data
+
+### Analysis
+
+The first step of our analysis was finding the amount of manufacturers producing electric cars each year. The total manufacturers per year will be needed to calculate the expected sale proportion for each year. The bar graph below shows the total number of manufacturers for each year. As we can see, the earlier years have fewer car manufacturers while the later years have more. The minimum is two car manufacturers in 2012 and the maximum is 16 in 2022.
+
+```{r, echo=FALSE}
+ggplot(yearMakes, aes(x = Year, y = n)) +
+  geom_col(color = "deepskyblue4", fill = "deepskyblue2") +
+  ylab("Number of Car Manufacturers") +
+  ggtitle("Number of Electric Car Manufacturers By Year")
+```
+
+As we can see, the number of electric car manufacturers have in general increased as time has gone on. This means that as time goes on, Tesla should have a lower proportion of sales since there are more choices if consumers choose a manufacturer at random.
+
+Next we found the proportion of cars for each year in our data that are Tesla. We divided the number of cars Tesla sold each year by the total amount of cars sold each year. We also plotted the expected proportion which would occur if vehicle purchases were random.
+
+```{r, echo=FALSE}
+ggplot(marketShare, aes(x = Year, y = values, fill = type)) +
+  geom_col(position = position_dodge2(preserve = "single"), color = "black") +
+  guides(fill = guide_legend(title = "Market Type")) +
+  ylab("Proportion of Sales") +
+  ggtitle("Tesla Proportion of Sales By Year")
+```
+
+As can be seen in the graph, Tesla usually has a much higher proportion than what they would if consumers chose cars at random. Interestingly, in 2012 they had a lower proportion than the random choice, and in 2013 they were very close to the random proportion.
+
+Next we found the confidence intervals for each year. We found the proportion of sales by dividing the number of Tesla vehicles sold each year by the total number of cars sold that year. We then used the Agresti-Coull method to find the confidence intervals for the proportion of cars that Tesla sold in each year. We plotted the lower and upper bound of these confidence intervals, along with the actual calculated proportion for each year. For each year we also plotted the expected proportion of cars sold that would be Tesla if cars were purchased at random from manufacturers. We did this to find if the random proportion lies within the Tesla sale proportion confidence interval for any year, which would mean that Tesla vehicles might have been chosen at random for that year, rather than specifically being chosen over other manufacturers. 
+
+```{r, echo=FALSE}
+ggplot(ciExpected, aes(x = Year, y = proportion, color = type)) +
+  geom_point(size = 2) +
+  ylab("Proportion of Sales") +
+  ggtitle("Tesla Sales Proportion 95% Confidence Intervals and Competitive Values By Year") +
+  guides(color = guide_legend(title = "Proportion Type"))
+```
+
+As seen in the graph, none of the proportions when cars are selected randomly lie within the confidence intervals of Tesla sale proportions. In 2012, the random proportion is much higher than Tesla proportion, meaning that there is a reason besides randomness that Tesla cars were chosen less often. In the years 2014 - 2022, Tesla vehicles were much more likely to be chosen for some reason other than random chance. In 2013, Tesla was more likely to be chosen due to random chance, but we can see that the lower bound of the confidence interval and the random proportion is very close. We decided to do a hypothesis test on the 2013 data to determine whether or not Tesla vehicles were chosen at random in 2013.
+
+#### 2013 Sales Hypothesis Testing
+
+Since the lower bound on the 95% confidence interval in 2013 is close to the expected value, we decided to perform a hypothesis test.
+
+We will find whether people are choosing Tesla at random or not in 2013 by using a one-sided test on a binomial distribution and finding the p-value. Since there are 4 manufacturers in 2013, we will be using 0.25 as our proportion for the binomial distribution. For n we will be using the total number of cars sold in 2013, 2886. Our hypotheses are:
+$$
+H_0: p = 0.25 \\
+H_a: p > 0.25
+$$
+If the null hypothesis is true, then
+$$
+X \sim \text{Binomial}(2886,0.25)
+$$
+Outcomes where X is greater than or equal to 777, which is the number of cars Tesla sold in 2013, will provide evidence against p = 0.25. Plotted below is the distribution when we assume our null hypothesis is true. The area colored green represents the probability of Tesla selling 777 or more cars.
+
+```{r, echo=FALSE}
+gbinom(2886, 0.25, scale = TRUE) +
+  geom_vline(xintercept = 777, color = "red", linetype = "dashed") +
+  geom_binom_density(2886, 0.25, a = 777, color = "green", scale = TRUE) +
+  xlab("Cars Sold") +
+  ylab("Probability") +
+  ggtitle("2013 Tesla Sales Binomial Distribution")
+```
+
+```{r, include=FALSE}
+p_value_2013 = 1 - pbinom(776, 2886, 0.25)
+p_value_2013
+
+p_values_2014_onward = ciExpectedPValue %>%
+  filter(Year > 2013) %>%
+  summarize(Year, p_value = 1 - pbinom(cars * Expected - 1, cars, Competitive))
+p_values_2014_onward
+
+p_value_2012 = pbinom(126, 725, 0.5)
+p_value_2012
+```
+We calculate to p-value to be 0.0094 which is significant when we set the significance level to 0.05. This means we would reject the null hypothesis that people were buying cars at random in 2013. This means people chose to buy Tesla vehicles more than 25% of the time, the rate when choosing at random.
+
+Similar to above, we used a binomial distribution to find the p-values for all the other years. We calculated each year using that year's car sales and number of manufacturers. Using a similar hypothesis test and changing the number for each year, we were able to find p-values and evidence against the null hypothesis for each year. When we found the p-value for 2012, we used a one-sided left tail test and got a p-value of 7.36065x10^-75, basically zero. This means in 2012, people were choosing to buy less Tesla vehicles than if manufacturers were chosen at random. For the years 2014-2023 we found p-values using one-sided right tail tests. All of the years had p-values extremely close to zero. This means that in years 2014-2023, consumers chose to buy Tesla vehicles more often than choosing from manufacturers at random.
+
+### Discussion
+
+For the years 2014 and beyond, Tesla has a larger proportion of electric vehicles sold than would be expected if cars purchased were chosen at random. This is seen in the confidence interval and competitve value graph where the confidence intervals have a much higher market share than the competitive market values, and the p-values to show the significance of the data. As time goes on it seems that Tesla's proportion of sales is usually growing, despite more companies joining the market which should lead to a decrease in the proportion of sales for any individual company. We are confident that there must be some reason or reasons that Tesla is chosen more than other car makes. Many factors could contribute to customers choosing Tesla vehicles more often, such as popularity, price, or production capacity. We didn't take these values into account but they could play a role in their market share.
+
+2012 is an interesting year. There were two electric vehicle producers, Nissan and Tesla. Tesla's proportion in this year was 17.5%, much lower than both Nissan and the 50% proportion expected if cars were chosen at random. One reason for this could be that Tesla was newer to the market than Nissan, and Nissan had been selling more cars in prior years so people had knowledge of their electric Leaf model. We don't know the specific reasons why Tesla was chosen less, and the reasons could be looked into further, but we are confident that it wasn't simply due to chance.
+
+2013 is the year where the Tesla proportion was closest to the expected proportion. There were 4 car producers, meaning the expected random proportion was 25%, and Tesla had a calculated proportion of 26.9%. The lower bound on our confidence interval was 25.33%. Since the lower bound is higher than the expected value, and due to the outcome of our hypothesis testing, we believe that Tesla was chosen more in 2013 than if cars were purchased at random. This could warrant further testing as this outcome could occurs about 1/100 when customers are choosing randomly, which isn't likely but has a much higher likelihood of happening than the outcomes in any other year. We don't know the specific reason why this year the random proportion and calculated proportion are so close, but it most likely has to do with Tesla ramping up production and sales because they were under the random proportion in the prior year and above the random proportion in following years.
+
+Shortcomings of our analysis may include limiting this to the state of Washington. We have no reason to believe the proportion wouldn't be similar in other states or across the United States as a whole, but the numbers might vary from state to state. We also can't offer explanation for Tesla's sale proportion being what it is, only that we are confident that Tesla is chosen more than it would be when choosing randomly from 2013-2023, and less than when choosing at random for 2012.
+
+Future questions may look at reasons for Tesla having a larger proportion of sales, such as looking at the number of dealerships, the amount of cars Tesla is capable of producing, prices of cars, and amount of advertisement. A similar approach to our project could be taken using Tesla vehicles to find how the proportion of individual models changes over years, to see if any model or models have become more or less popular with time.
+
+For 2012, Tesla had a smaller proportion of sales than it would when manufacturers are chosen as random, while Tesla had a larger proportion in the years 2013 - 2022. By comparing Tesla's proportion of sales to the expected proportion when manufacturers are chosen at random, we were able to determine that Tesla vehicles were chosen by consumers more often than when choosing at random in 2013 - 2022, and chosen less often than if vehicles were chosen at random in 2012.
+
