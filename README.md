@@ -6,7 +6,8 @@ This project analyzes Tesla's proportion of electric vehicle sales in Washington
 The dataset used in this project comes from the Washington State Electric Vehicle Population Data. It includes information about electric vehicle registrations, filtered to focus on pure electric cars sold from 2012 onward.
 
 ## Methodology
-### Filtering Data: Removed hybrid vehicles and manufacturers producing fewer than 50 vehicles per year to ensure data quality.
+### Filtering Data: 
+Removed hybrid vehicles and manufacturers producing fewer than 50 vehicles per year to ensure data quality.
 ### Expected vs. Actual Sales Proportions:
 Calculated the expected proportion of Tesla sales assuming random manufacturer selection.
 Compared this with Tesla's actual sales proportions.
